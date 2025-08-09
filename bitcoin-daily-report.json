@@ -1,0 +1,339 @@
+{
+  "name": "Bitcoin Daily Report",
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cd6b3e6f-5b6f-4aa0-9e9b-ef6e63b3c2f5",
+              "leftValue": "={{ $json.priceUSDRaw }}",
+              "rightValue": 10000,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            },
+            {
+              "id": "b0db7c5f-4d8e-4c3f-a3d4-2f5e98c3b1f8",
+              "leftValue": "={{ $json.priceUSDRaw }}",
+              "rightValue": 500000,
+              "operator": {
+                "type": "number",
+                "operation": "lte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ba82f25f-f41d-4682-a3e0-a75af213f7f8",
+      "name": "Validate Data",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -360
+      ],
+      "notesInFlow": true,
+      "notes": "Ensures price is within reasonable bounds"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#n8n-demo",
+          "mode": "name"
+        },
+        "text": "=₿ *比特幣每日報告*\n\n💰 *現價 (USD):* {{ $json.priceUSD }}\n💰 *現價 (TWD):* {{ $json.priceTWD }}\n\n{{ $json.changeEmoji }} *24小時變化:* {{ $json.changePercent }} ({{ $json.changeDollar }})\n📊 *市場趨勢:* {{ $json.trend }}\n\n📈 *技術指標*\n{{ $json.rsiEmoji }} *RSI (14):* {{ $json.rsi }} - {{ $json.rsiStatus }}\n💹 *24小時交易量:* {{ $json.volume }}\n🏦 *總市值:* {{ $json.marketCap }}\n\n⏰ _更新時間: {{ $json.timestamp }}_\n📊 _數據來源: CoinGecko_",
+        "otherOptions": {
+          "link_names": true,
+          "unfurl_links": false,
+          "unfurl_media": false
+        }
+      },
+      "id": "a2d3d0b8-2dc7-4bdf-8170-630fe70a70b1",
+      "name": "Send to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        -460
+      ],
+      "notesInFlow": true,
+      "webhookId": "eadee8db-6349-49af-90d5-deeac7554b4a",
+      "credentials": {
+        "slackApi": {
+          "id": "TlBKLWpZUzoKXjMg",
+          "name": "Slack account"
+        }
+      },
+      "notes": "Sends formatted report to Slack channel"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "c212036b-c476-4ad9-a4e1-8d74978377ec",
+      "name": "Prepare Error Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1320,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "aae72ae6-2547-4c14-97b0-283b3490f537",
+      "name": "Daily Trigger 13:",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,twd&include_24hr_change=true&include_24hr_vol=true&include_market_cap=true&include_last_updated_at=true",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "b7f07d5f-acc3-4461-ad42-0336eb67deeb",
+      "name": "Get Bitcoin Price1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=15&interval=daily",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "553abc20-49b4-4b68-a442-f54f58d63651",
+      "name": "Get Historical Data1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 直接從前一個節點獲取歷史數據\nconst historicalData = $json.prices;\n\n// 從特定節點獲取價格數據\nconst priceData = $('Get Bitcoin Price1').first().json;\nconst currentData = priceData.bitcoin;\n\n// 檢查數據\nif (!currentData || !historicalData) {\n  throw new Error('Missing required data');\n}\n\n// Calculate RSI\nfunction calculateRSI(prices, period = 14) {\n  if (!prices || prices.length < period + 1) return 50;\n  \n  let gains = 0;\n  let losses = 0;\n  \n  for (let i = 1; i <= period; i++) {\n    const change = prices[i][1] - prices[i-1][1];\n    if (change > 0) {\n      gains += change;\n    } else {\n      losses += Math.abs(change);\n    }\n  }\n  \n  const avgGain = gains / period;\n  const avgLoss = losses / period;\n  \n  if (avgLoss === 0) return 100;\n  \n  const rs = avgGain / avgLoss;\n  const rsi = 100 - (100 / (1 + rs));\n  \n  return Math.round(rsi * 100) / 100;\n}\n\n// Calculate RSI\nconst rsi = calculateRSI(historicalData);\n\n// Determine RSI status\nlet rsiStatus = '➡️ 中性';\nlet rsiEmoji = '😐';\nif (rsi > 70) {\n  rsiStatus = '🔥 超買';\n  rsiEmoji = '🚨';\n} else if (rsi < 30) {\n  rsiStatus = '❄️ 超賣';\n  rsiEmoji = '💎';\n} else if (rsi > 60) {\n  rsiStatus = '📈 偏強';\n  rsiEmoji = '💪';\n} else if (rsi < 40) {\n  rsiStatus = '📉 偏弱';\n  rsiEmoji = '😰';\n}\n\n// Format numbers\nconst formatNumber = (num) => {\n  return new Intl.NumberFormat('zh-TW').format(Math.round(num));\n};\n\nconst formatCurrency = (num) => {\n  return new Intl.NumberFormat('zh-TW', {\n    style: 'currency',\n    currency: 'USD',\n    minimumFractionDigits: 0,\n    maximumFractionDigits: 0\n  }).format(num);\n};\n\nconst formatBillion = (num) => {\n  const billion = num / 1000000000;\n  return `$${billion.toFixed(1)}B`;\n};\n\n// Get current values\nconst priceUSD = currentData.usd || 0;\nconst priceTWD = currentData.twd || 0;\nconst change24h = currentData.usd_24h_change || 0;\nconst volume24h = currentData.usd_24h_vol || 0;\nconst marketCap = currentData.usd_market_cap || 0;\n\n// Determine trend\nconst changeEmoji = change24h > 0 ? '📈' : '📉';\nconst trend = Math.abs(change24h) > 5 ? \n  (change24h > 0 ? '🐂 強勢牛市' : '🐻 弱勢熊市') : \n  '➡️ 盤整';\n\nconst color = change24h > 0 ? '#2EB67D' : '#E01E5A';\n\nconst timestamp = new Date().toLocaleString('zh-TW', {\n  timeZone: 'Asia/Taipei',\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n  hour: '2-digit',\n  minute: '2-digit'\n});\n\nconst changeDollar = Math.abs(priceUSD * change24h / 100);\n\nreturn [{\n  json: {\n    priceUSD: formatCurrency(priceUSD),\n    priceUSDRaw: priceUSD,\n    priceTWD: `NT$${formatNumber(priceTWD)}`,\n    changePercent: `${change24h > 0 ? '+' : ''}${change24h.toFixed(2)}%`,\n    changeDollar: formatCurrency(changeDollar),\n    changeEmoji: changeEmoji,\n    volume: formatBillion(volume24h),\n    marketCap: formatBillion(marketCap),\n    rsi: rsi,\n    rsiStatus: rsiStatus,\n    rsiEmoji: rsiEmoji,\n    trend: trend,\n    color: color,\n    timestamp: timestamp\n  }\n}];"
+      },
+      "id": "6970f858-c603-4bbf-b664-83ba4065a643",
+      "name": "Process Data & Calculate RSI1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🚀 比特幣每日報告 Workflow v1.0\n\n### 📋 功能概述\n自動化比特幣市場報告系統，每日定時發送專業的市場分析到 Slack\n\n### ⚡ 核心功能\n- 📅 **定時執行**: 每日 13:00 (台北時間) 自動觸發\n- 💰 **即時價格**: 獲取 BTC/USD 和 BTC/TWD 最新價格\n- 📊 **技術分析**: 計算 14 期 RSI 指標，判斷超買超賣\n- 📈 **市場趨勢**: 分析 24 小時價格變化，判斷牛熊市\n- 💬 **Slack 通知**: 格式化報告自動發送到指定頻道\n\n### 🔄 工作流程\n1. **Schedule Trigger** → 每日 13:00 觸發\n2. **Get Bitcoin Price** → 從 CoinGecko 獲取即時價格\n3. **Get Historical Data** → 獲取 15 天歷史數據\n4. **Process & Calculate RSI** → 計算技術指標並格式化\n5. **Validate Data** → 驗證價格合理性 ($10K-$500K)\n6. **Send to Slack** → 發送格式化報告\n\n### 📊 RSI 指標解讀\n- 🔥 **RSI > 70**: 超買區，可能回調\n- 💎 **RSI < 30**: 超賣區，可能反彈\n- 💪 **RSI 60-70**: 偏強勢\n- 😰 **RSI 30-40**: 偏弱勢\n- ➡️ **RSI 40-60**: 中性區間\n\n### ⚙️ 設定注意事項\n1. **Slack 頻道**: 更新 Send to Slack 節點的頻道名稱\n2. **時區設定**: Workflow 已設為 Asia/Taipei\n3. **API 限制**: CoinGecko 免費版每月 10,000 次呼叫\n4. **錯誤處理**: 價格異常時會跳到錯誤訊息分支\n\n### 🛠️ 自訂選項\n- 修改 RSI 期數（預設 14）\n- 調整價格驗證範圍\n- 加入更多技術指標\n- 支援多種加密貨幣\n\n### 📝 版本資訊\n- 建立日期: 2025-01-05\n- 版本: 1.0\n- 作者: Bitcoin Price Bot\n- 資料來源: CoinGecko API (免費版)",
+        "height": 800,
+        "width": 460,
+        "color": 5
+      },
+      "id": "7d91246e-c13d-4b5a-94a8-66c818d11e30",
+      "name": "Workflow 完整說明",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        -900
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# 💰 Bitcoin Daily Report Bot\n\n**每日 13:00 自動發送比特幣市場報告到 Slack**\n\n## 📊 報告內容\n- 即時價格 (USD/TWD)\n- 24 小時漲跌幅\n- RSI 技術指標 (14 期)\n- 交易量 & 市值\n- 市場趨勢分析\n\n## 🔧 快速設定\n1. 更新 Slack 頻道 ID\n2. 設定 Slack 認證\n3. 啟用 Workflow\n\n## ⚡ 資料流程\n```\nTrigger (13:00)\n  ↓\nGet Price → Get History\n  ↓\nCalculate RSI\n  ↓\nValidate → Send to Slack\n```\n\n## 🎯 RSI 訊號\n- 超買 > 70 🔥\n- 超賣 < 30 💎\n- 中性 40-60 ➡️\n\n---\n💡 **提示**: 可加入更多幣種或指標",
+        "height": 500,
+        "width": 320,
+        "color": 3
+      },
+      "id": "073a1eb9-86f6-47ee-b5f2-ed1da9c805a1",
+      "name": "快速指南",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2180,
+        -900
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🚨 常見問題排除\n\n### ❌ API 錯誤\n**問題**: Request failed with status code 429\n**解決**: API 達到速率限制，等待 1 分鐘後重試\n\n### ❌ Slack 發送失敗\n**問題**: Channel not found\n**解決**: \n1. 確認頻道名稱正確（含 #）\n2. 確認 Bot 已加入頻道\n3. 使用 `/invite @BotName` 邀請\n\n### ❌ RSI 計算錯誤\n**問題**: Cannot read property 'prices'\n**解決**: 檢查歷史數據 API 是否正常返回\n\n### ❌ 時區不正確\n**問題**: 執行時間不是 13:00\n**解決**: \n1. 檢查 Workflow Settings\n2. 確認 timezone: \"Asia/Taipei\"\n3. 重啟 Workflow\n\n### ❌ 價格驗證失敗\n**問題**: 價格超出合理範圍\n**解決**: 調整 Validate Data 節點的範圍設定",
+        "height": 480,
+        "width": 380
+      },
+      "id": "1302518d-e588-4dce-8e04-7520e0b23881",
+      "name": "問題排除指南",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 📈 進階功能擴充\n\n### 🔧 支援多幣種\n```javascript\n// 修改 API URL\nids=bitcoin,ethereum,binancecoin\n```\n\n### 📊 加入 MACD 指標\n```javascript\nfunction calculateMACD(prices) {\n  // EMA 12, 26, Signal 9\n  // 實作 MACD 計算\n}\n```\n\n### ⏰ 多次通知\n- 08:00 - 早盤報告\n- 13:00 - 午間更新\n- 21:00 - 收盤總結\n\n### 🎯 價格警報\n```javascript\nif (change24h > 10) {\n  // 發送緊急通知\n}\n```\n\n### 📱 Line/Telegram 整合\n- 使用對應的 N8N 節點\n- 複製 Slack 訊息格式\n\n### 💾 數據儲存\n- Google Sheets 記錄\n- 資料庫存檔\n- 歷史趨勢分析",
+        "height": 480,
+        "width": 380,
+        "color": 4
+      },
+      "id": "a245deb7-be5e-48f0-b855-bebe2649f3d5",
+      "name": "進階功能建議",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2080,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 📌 重要提醒\n\n### ⚠️ 安全性\n- 不要在 Code 節點中硬編碼 API 金鑰\n- 使用 N8N 的 Credentials 功能\n- 定期更新認證資訊\n\n### 💰 成本考量\n- CoinGecko 免費版: 10,000 次/月\n- 每日執行 2 次 = 60 次/月\n- 充足的配額空間\n\n### 🔄 維護建議\n- 每月檢查執行紀錄\n- 監控 API 使用量\n- 定期測試 Slack 連線\n- 備份 Workflow 設定\n\n### 📊 效能優化\n- 合併 API 請求\n- 快取靜態數據\n- 避免重複計算\n\n---\n💡 記得定期檢查 Workflow 執行狀況！",
+        "height": 420,
+        "width": 340,
+        "color": 6
+      },
+      "id": "acda74c1-eb3b-421f-ab9c-e00bf5be1c73",
+      "name": "重要提醒",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2540,
+        -900
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Validate Data": {
+      "main": [
+        [
+          {
+            "node": "Send to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Error Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Trigger 13:": {
+      "main": [
+        [
+          {
+            "node": "Get Bitcoin Price1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Bitcoin Price1": {
+      "main": [
+        [
+          {
+            "node": "Get Historical Data1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Historical Data1": {
+      "main": [
+        [
+          {
+            "node": "Process Data & Calculate RSI1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Data & Calculate RSI1": {
+      "main": [
+        [
+          {
+            "node": "Validate Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "841f3e59-c569-4acf-af4b-7fe94b4db515",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "888a8c05da76b495dd9ecfb59aacefd871c48ab4e43409e77d226b344d9412b4"
+  },
+  "id": "JKfxhTtEbJnaLbLZ",
+  "tags": [
+    {
+      "name": "crypto",
+      "id": "SprpeXCvjlEztqHm",
+      "createdAt": "2025-07-05T10:55:00.497Z",
+      "updatedAt": "2025-07-05T10:55:00.497Z"
+    },
+    {
+      "name": "scheduled",
+      "id": "7mIDXVg5aVbvpEH5",
+      "createdAt": "2025-07-05T10:55:03.681Z",
+      "updatedAt": "2025-07-05T10:55:03.681Z"
+    },
+    {
+      "name": "slack-notification",
+      "id": "cjChk96c2e48qKOd",
+      "createdAt": "2025-07-05T10:55:07.842Z",
+      "updatedAt": "2025-07-05T10:55:07.842Z"
+    },
+    {
+      "name": "automated-report",
+      "id": "Vbfkr2W0YLnxG316",
+      "createdAt": "2025-07-05T10:55:13.972Z",
+      "updatedAt": "2025-07-05T10:55:13.972Z"
+    }
+  ]
+}
