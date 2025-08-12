@@ -1,0 +1,338 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-slides",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "990255ca-bd3a-4a8c-a808-9cf8be7a431c",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [
+        -688,
+        528
+      ],
+      "typeVersion": 2,
+      "webhookId": "simple-slides-webhook"
+    },
+    {
+      "parameters": {
+        "operation": "copy",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.body.template_id }}",
+          "mode": "id"
+        },
+        "name": "={{ $json.body.presentation_title }}_{{ $now.format('yyyy-MM-dd_HH-mm') }}",
+        "sameFolder": false,
+        "driveId": {
+          "__rl": true,
+          "value": "0AMWRtiy_gkUWUk9PVA",
+          "mode": "list"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1n908D9XciS0pMa0Y9ZfJbBkL78r6p7pK",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "03b066f8-5204-4949-b793-6ee9b98e8ca8",
+      "name": "Create Presentation Copy",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [
+        -464,
+        528
+      ],
+      "typeVersion": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "NVRmrBBlSe0wKY4k",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 🚀 準備投影片複製資料\n\nconst webhookData = $('Webhook Trigger').first().json.body;\nconst slides = webhookData.slides;\nconst presentation = $input.first().json;\nconst presentationId = presentation.presentationId;\n\n// 取得模板投影片結構\nconst templateSlide = presentation.slides && presentation.slides[0] ? presentation.slides[0] : null;\n\nif (!templateSlide) {\n  throw new Error('找不到模板投影片');\n}\n\n// 🔍 找出圖片元素 - 尋找 description 為 {{IMAGE_URL}} 的圖片\nconst imageElements = templateSlide.pageElements.filter(element => \n  element.image && element.description === '{{IMAGE_URL}}'\n);\n\n// 建立投影片複製請求\nconst totalSlides = slides.length;\nconst availableSlides = 1; // 模板只有一張投影片\nconst duplicateRequests = [];\n\nif (totalSlides > availableSlides) {\n  const duplicateCount = totalSlides - availableSlides;\n  for (let i = 0; i < duplicateCount; i++) {\n    duplicateRequests.push({\n      duplicateObject: {\n        objectId: templateSlide.objectId\n        // 不指定新 ID，讓 Google Slides 自動產生\n      }\n    });\n  }\n}\n\n// 準備下一階段需要的資料\nreturn {\n  presentationId: presentationId,\n  duplicateRequests: duplicateRequests,\n  needsDuplication: duplicateRequests.length > 0,\n  slidesData: slides,\n  templateSlide: templateSlide,\n  imageElements: imageElements,\n  totalSlides: totalSlides\n};"
+      },
+      "id": "681b6f89-dc92-49ae-ba4f-2143b884bd59",
+      "name": "Prepare Slide Duplication",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        -16,
+        528
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "needs-duplication",
+              "leftValue": "={{ $json.needsDuplication }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "19a3bb3a-b0b1-4f2a-9f81-b8ec5e1e4dff",
+      "name": "Need More Slides?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        208,
+        528
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://slides.googleapis.com/v1/presentations/{{ $json.presentationId }}:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"requests\": {{ JSON.stringify($json.duplicateRequests) }}\n}",
+        "options": {}
+      },
+      "id": "2a5a6f6b-6aa5-4e8a-945f-9d05db34b632",
+      "name": "Duplicate Slides Only",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        432,
+        448
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "googleApi": {
+          "id": "Pcdnjn1yjSelE68O",
+          "name": "Google SA - Slides Automation"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "get",
+        "presentationId": "={{ $('Prepare Slide Duplication').first().json.presentationId }}"
+      },
+      "type": "n8n-nodes-base.googleSlides",
+      "typeVersion": 2,
+      "position": [
+        656,
+        528
+      ],
+      "id": "b8af089d-e764-441d-8e59-9ee663bd00d7",
+      "name": "Read Full Presentation",
+      "credentials": {
+        "googleApi": {
+          "id": "Pcdnjn1yjSelE68O",
+          "name": "Google SA - Slides Automation"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 🚀 準備所有內容替換請求\n\nconst prepData = $('Prepare Slide Duplication').first().json;\nconst updatedPresentation = $input.first().json;\nconst slides = prepData.slidesData;\n\n// 建立所有內容替換請求\nconst allRequests = [];\n\n// 處理每張投影片的內容（使用實際的投影片 ID）\nslides.forEach((slideDataItem, index) => {\n  // 從更新後的簡報結構中取得實際的投影片 ID\n  const currentSlide = updatedPresentation.slides[index];\n  if (!currentSlide) return;\n  \n  const slideId = currentSlide.objectId;\n  \n  // 🔤 文字替換請求\n  const textReplacements = [\n    { placeholder: '{{MAIN_TITLE}}', value: slideDataItem.MAIN_TITLE },\n    { placeholder: '{{SUB_TITLE}}', value: slideDataItem.SUB_TITLE },\n    { placeholder: '{{BULLET1}}', value: slideDataItem.BULLET1 },\n    { placeholder: '{{BULLET2}}', value: slideDataItem.BULLET2 },\n    { placeholder: '{{BULLET3}}', value: slideDataItem.BULLET3 }\n  ];\n\n  textReplacements.forEach(replacement => {\n    if (replacement.value && replacement.value.toString().trim() !== '') {\n      allRequests.push({\n        replaceAllText: {\n          containsText: {\n            text: replacement.placeholder,\n            matchCase: false\n          },\n          replaceText: replacement.value.toString().trim(),\n          pageObjectIds: [slideId]\n        }\n      });\n    }\n  });\n  \n  // 🖼️ 圖片替換請求\n  if (slideDataItem.IMAGE_URL && slideDataItem.IMAGE_URL.trim() !== '') {\n    // 找出該投影片的圖片元素\n    const imageElements = currentSlide.pageElements.filter(element => \n      element.image && element.description === '{{IMAGE_URL}}'\n    );\n    \n    imageElements.forEach(imageElement => {\n      allRequests.push({\n        replaceImage: {\n          imageObjectId: imageElement.objectId,\n          imageReplaceMethod: 'CENTER_CROP',\n          url: slideDataItem.IMAGE_URL\n        }\n      });\n    });\n  }\n});\n\nreturn {\n  presentationId: prepData.presentationId,\n  allRequests: allRequests,\n  totalOperations: allRequests.length,\n  textOperations: allRequests.filter(req => req.replaceAllText).length,\n  imageOperations: allRequests.filter(req => req.replaceImage).length,\n  slidesProcessed: slides.length\n};"
+      },
+      "id": "82a2b895-6417-492b-bd07-2ea8d8fe7493",
+      "name": "Prepare Content Updates",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        880,
+        528
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://slides.googleapis.com/v1/presentations/{{ $json.presentationId }}:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"requests\": {{ JSON.stringify($json.allRequests) }}\n}",
+        "options": {}
+      },
+      "id": "00181f46-5e97-4c4f-9a35-0ad658167ef0",
+      "name": "Execute All Updates",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1104,
+        528
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "googleApi": {
+          "id": "Pcdnjn1yjSelE68O",
+          "name": "Google SA - Slides Automation"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"✅ 簡報生成成功\",\n  \"presentation_id\": \"{{ $('Prepare Content Updates').first().json.presentationId }}\",\n  \"presentation_url\": \"https://docs.google.com/presentation/d/{{ $('Prepare Content Updates').first().json.presentationId }}/edit\",\n  \"slide_count\": {{ $('Prepare Content Updates').first().json.slidesProcessed }},\n  \"operations_performed\": {\n    \"text_operations\": {{ $('Prepare Content Updates').first().json.textOperations }},\n    \"image_operations\": {{ $('Prepare Content Updates').first().json.imageOperations }},\n    \"total_operations\": {{ $('Prepare Content Updates').first().json.totalOperations }}\n  },\n  \"features\": {\n    \"text_replacement\": true,\n    \"image_replacement\": true,\n    \"two_stage_processing\": true\n  },\n  \"created_at\": \"{{ $now.toISO() }}\",\n  \"version\": \"v3-optimized\",\n  \"note\": \"使用兩階段處理：先複製投影片，再統一更新所有內容\"\n}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "7592d8e7-a280-46db-9af4-b43ba3452741",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [
+        1328,
+        528
+      ],
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "get",
+        "presentationId": "={{ $json.id }}"
+      },
+      "type": "n8n-nodes-base.googleSlides",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        528
+      ],
+      "id": "9f5d3c3e-33ea-41bb-9b4c-8f370ff6b4bf",
+      "name": "Read Template Structure",
+      "credentials": {
+        "googleApi": {
+          "id": "Pcdnjn1yjSelE68O",
+          "name": "Google SA - Slides Automation"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Create Presentation Copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Presentation Copy": {
+      "main": [
+        [
+          {
+            "node": "Read Template Structure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Slide Duplication": {
+      "main": [
+        [
+          {
+            "node": "Need More Slides?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Need More Slides?": {
+      "main": [
+        [
+          {
+            "node": "Duplicate Slides Only",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Full Presentation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate Slides Only": {
+      "main": [
+        [
+          {
+            "node": "Read Full Presentation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Full Presentation": {
+      "main": [
+        [
+          {
+            "node": "Prepare Content Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Content Updates": {
+      "main": [
+        [
+          {
+            "node": "Execute All Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute All Updates": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Template Structure": {
+      "main": [
+        [
+          {
+            "node": "Prepare Slide Duplication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "888a8c05da76b495dd9ecfb59aacefd871c48ab4e43409e77d226b344d9412b4"
+  }
+}
