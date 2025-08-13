@@ -7,15 +7,15 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "990255ca-bd3a-4a8c-a808-9cf8be7a431c",
+      "id": "55c587f2-6c24-4fa3-8708-f08dc94d2e32",
       "name": "Webhook Trigger",
       "type": "n8n-nodes-base.webhook",
       "position": [
-        -688,
-        528
+        -1712,
+        -304
       ],
       "typeVersion": 2,
-      "webhookId": "simple-slides-webhook"
+      "webhookId": "dynamic-slides-webhook"
     },
     {
       "parameters": {
@@ -39,12 +39,12 @@
         },
         "options": {}
       },
-      "id": "03b066f8-5204-4949-b793-6ee9b98e8ca8",
+      "id": "72c95aa2-0d2e-480c-a041-42113ea6b78e",
       "name": "Create Presentation Copy",
       "type": "n8n-nodes-base.googleDrive",
       "position": [
-        -464,
-        528
+        -1488,
+        -304
       ],
       "typeVersion": 3,
       "credentials": {
@@ -56,14 +56,14 @@
     },
     {
       "parameters": {
-        "jsCode": "// 🚀 準備投影片複製資料\n\nconst webhookData = $('Webhook Trigger').first().json.body;\nconst slides = webhookData.slides;\nconst presentation = $input.first().json;\nconst presentationId = presentation.presentationId;\n\n// 取得模板投影片結構\nconst templateSlide = presentation.slides && presentation.slides[0] ? presentation.slides[0] : null;\n\nif (!templateSlide) {\n  throw new Error('找不到模板投影片');\n}\n\n// 🔍 找出圖片元素 - 尋找 description 為 {{IMAGE_URL}} 的圖片\nconst imageElements = templateSlide.pageElements.filter(element => \n  element.image && element.description === '{{IMAGE_URL}}'\n);\n\n// 建立投影片複製請求\nconst totalSlides = slides.length;\nconst availableSlides = 1; // 模板只有一張投影片\nconst duplicateRequests = [];\n\nif (totalSlides > availableSlides) {\n  const duplicateCount = totalSlides - availableSlides;\n  for (let i = 0; i < duplicateCount; i++) {\n    duplicateRequests.push({\n      duplicateObject: {\n        objectId: templateSlide.objectId\n        // 不指定新 ID，讓 Google Slides 自動產生\n      }\n    });\n  }\n}\n\n// 準備下一階段需要的資料\nreturn {\n  presentationId: presentationId,\n  duplicateRequests: duplicateRequests,\n  needsDuplication: duplicateRequests.length > 0,\n  slidesData: slides,\n  templateSlide: templateSlide,\n  imageElements: imageElements,\n  totalSlides: totalSlides\n};"
+        "jsCode": "// 🚀 動態準備投影片複製資料 - 支援任何欄位結構\n\nconst webhookData = $('Webhook Trigger').first().json.body;\nconst slides = webhookData.slides;\nconst presentation = $input.first().json;\nconst presentationId = presentation.presentationId;\n\n// 取得模板投影片結構\nconst templateSlide = presentation.slides && presentation.slides[0] ? presentation.slides[0] : null;\n\nif (!templateSlide) {\n  throw new Error('找不到模板投影片');\n}\n\n// 🔍 動態分析模板中的所有 placeholder\n// 掃描所有文字元素找出 {{}} 格式的 placeholder\nconst textPlaceholders = new Set();\nconst imagePlaceholders = new Set();\n\n// 掃描文字元素\nif (templateSlide.pageElements) {\n  templateSlide.pageElements.forEach(element => {\n    // 處理形狀中的文字\n    if (element.shape && element.shape.text && element.shape.text.textElements) {\n      element.shape.text.textElements.forEach(textElement => {\n        if (textElement.textRun && textElement.textRun.content) {\n          const content = textElement.textRun.content;\n          const matches = content.match(/{{\\s*([A-Za-z0-9_]+)\\s*}}/g);\n          if (matches) {\n            matches.forEach(match => {\n              const placeholder = match.replace(/{{\\s*/, '').replace(/\\s*}}/, '');\n              textPlaceholders.add(placeholder);\n            });\n          }\n        }\n      });\n    }\n    \n    // 處理表格中的文字\n    if (element.table && element.table.tableRows) {\n      element.table.tableRows.forEach(row => {\n        if (row.tableCells) {\n          row.tableCells.forEach(cell => {\n            if (cell.text && cell.text.textElements) {\n              cell.text.textElements.forEach(textElement => {\n                if (textElement.textRun && textElement.textRun.content) {\n                  const content = textElement.textRun.content;\n                  const matches = content.match(/{{\\s*([A-Za-z0-9_]+)\\s*}}/g);\n                  if (matches) {\n                    matches.forEach(match => {\n                      const placeholder = match.replace(/{{\\s*/, '').replace(/\\s*}}/, '');\n                      textPlaceholders.add(placeholder);\n                    });\n                  }\n                }\n              });\n            }\n          });\n        }\n      });\n    }\n    \n    // 處理圖片元素 - 檢查 description 或 title 中的 placeholder\n    if (element.image) {\n      const description = element.description || '';\n      const title = element.title || '';\n      \n      // 檢查 description 中的 placeholder\n      if (description.includes('{{') && description.includes('}}')) {\n        const matches = description.match(/{{\\s*([A-Za-z0-9_]+)\\s*}}/g);\n        if (matches) {\n          matches.forEach(match => {\n            const placeholder = match.replace(/{{\\s*/, '').replace(/\\s*}}/, '');\n            imagePlaceholders.add(placeholder);\n          });\n        }\n      }\n      \n      // 檢查 title 中的 placeholder\n      if (title.includes('{{') && title.includes('}}')) {\n        const matches = title.match(/{{\\s*([A-Za-z0-9_]+)\\s*}}/g);\n        if (matches) {\n          matches.forEach(match => {\n            const placeholder = match.replace(/{{\\s*/, '').replace(/\\s*}}/, '');\n            imagePlaceholders.add(placeholder);\n          });\n        }\n      }\n    }\n  });\n}\n\n// 🧠 分析 API 資料結構，自動匹配欄位\nconst allPlaceholders = new Set([...textPlaceholders, ...imagePlaceholders]);\nconst detectedFields = new Set();\n\nif (slides.length > 0) {\n  const sampleSlide = slides[0];\n  Object.keys(sampleSlide).forEach(key => {\n    detectedFields.add(key);\n  });\n}\n\n// 建立投影片複製請求\nconst totalSlides = slides.length;\nconst availableSlides = 1; // 模板只有一張投影片\nconst duplicateRequests = [];\n\nif (totalSlides > availableSlides) {\n  const duplicateCount = totalSlides - availableSlides;\n  for (let i = 0; i < duplicateCount; i++) {\n    duplicateRequests.push({\n      duplicateObject: {\n        objectId: templateSlide.objectId\n        // 不指定新 ID，讓 Google Slides 自動產生\n      }\n    });\n  }\n}\n\n// 準備下一階段需要的資料\nreturn {\n  presentationId: presentationId,\n  duplicateRequests: duplicateRequests,\n  needsDuplication: duplicateRequests.length > 0,\n  slidesData: slides,\n  templateSlide: templateSlide,\n  totalSlides: totalSlides,\n  // 🎯 新增動態分析結果\n  detectedTextPlaceholders: Array.from(textPlaceholders),\n  detectedImagePlaceholders: Array.from(imagePlaceholders),\n  detectedApiFields: Array.from(detectedFields),\n  allPlaceholders: Array.from(allPlaceholders),\n  mappingInfo: {\n    templatePlaceholders: Array.from(allPlaceholders),\n    apiFields: Array.from(detectedFields),\n    unmatchedPlaceholders: Array.from(allPlaceholders).filter(p => !detectedFields.has(p)),\n    unmatchedApiFields: Array.from(detectedFields).filter(f => !allPlaceholders.has(f))\n  }\n};"
       },
-      "id": "681b6f89-dc92-49ae-ba4f-2143b884bd59",
-      "name": "Prepare Slide Duplication",
+      "id": "78da383a-9124-4a64-80bd-ba5925478422",
+      "name": "Dynamic Template Analysis",
       "type": "n8n-nodes-base.code",
       "position": [
-        -16,
-        528
+        -1040,
+        -304
       ],
       "typeVersion": 2
     },
@@ -89,12 +89,12 @@
         },
         "options": {}
       },
-      "id": "19a3bb3a-b0b1-4f2a-9f81-b8ec5e1e4dff",
+      "id": "cb52689f-5e96-478a-ac81-cf1844be01bb",
       "name": "Need More Slides?",
       "type": "n8n-nodes-base.if",
       "position": [
-        208,
-        528
+        -816,
+        -304
       ],
       "typeVersion": 2
     },
@@ -109,12 +109,12 @@
         "jsonBody": "={\n  \"requests\": {{ JSON.stringify($json.duplicateRequests) }}\n}",
         "options": {}
       },
-      "id": "2a5a6f6b-6aa5-4e8a-945f-9d05db34b632",
+      "id": "3c2d38ca-5dbf-4aad-a330-65dde6db3330",
       "name": "Duplicate Slides Only",
       "type": "n8n-nodes-base.httpRequest",
       "position": [
-        432,
-        448
+        -592,
+        -368
       ],
       "typeVersion": 4.2,
       "credentials": {
@@ -128,15 +128,15 @@
       "parameters": {
         "authentication": "serviceAccount",
         "operation": "get",
-        "presentationId": "={{ $('Prepare Slide Duplication').first().json.presentationId }}"
+        "presentationId": "={{ $('Dynamic Template Analysis').first().json.presentationId }}"
       },
       "type": "n8n-nodes-base.googleSlides",
       "typeVersion": 2,
       "position": [
-        656,
-        528
+        -368,
+        -304
       ],
-      "id": "b8af089d-e764-441d-8e59-9ee663bd00d7",
+      "id": "72819c38-a625-4aa4-855f-cc7460029795",
       "name": "Read Full Presentation",
       "credentials": {
         "googleApi": {
@@ -147,14 +147,14 @@
     },
     {
       "parameters": {
-        "jsCode": "// 🚀 準備所有內容替換請求\n\nconst prepData = $('Prepare Slide Duplication').first().json;\nconst updatedPresentation = $input.first().json;\nconst slides = prepData.slidesData;\n\n// 建立所有內容替換請求\nconst allRequests = [];\n\n// 處理每張投影片的內容（使用實際的投影片 ID）\nslides.forEach((slideDataItem, index) => {\n  // 從更新後的簡報結構中取得實際的投影片 ID\n  const currentSlide = updatedPresentation.slides[index];\n  if (!currentSlide) return;\n  \n  const slideId = currentSlide.objectId;\n  \n  // 🔤 文字替換請求\n  const textReplacements = [\n    { placeholder: '{{MAIN_TITLE}}', value: slideDataItem.MAIN_TITLE },\n    { placeholder: '{{SUB_TITLE}}', value: slideDataItem.SUB_TITLE },\n    { placeholder: '{{BULLET1}}', value: slideDataItem.BULLET1 },\n    { placeholder: '{{BULLET2}}', value: slideDataItem.BULLET2 },\n    { placeholder: '{{BULLET3}}', value: slideDataItem.BULLET3 }\n  ];\n\n  textReplacements.forEach(replacement => {\n    if (replacement.value && replacement.value.toString().trim() !== '') {\n      allRequests.push({\n        replaceAllText: {\n          containsText: {\n            text: replacement.placeholder,\n            matchCase: false\n          },\n          replaceText: replacement.value.toString().trim(),\n          pageObjectIds: [slideId]\n        }\n      });\n    }\n  });\n  \n  // 🖼️ 圖片替換請求\n  if (slideDataItem.IMAGE_URL && slideDataItem.IMAGE_URL.trim() !== '') {\n    // 找出該投影片的圖片元素\n    const imageElements = currentSlide.pageElements.filter(element => \n      element.image && element.description === '{{IMAGE_URL}}'\n    );\n    \n    imageElements.forEach(imageElement => {\n      allRequests.push({\n        replaceImage: {\n          imageObjectId: imageElement.objectId,\n          imageReplaceMethod: 'CENTER_CROP',\n          url: slideDataItem.IMAGE_URL\n        }\n      });\n    });\n  }\n});\n\nreturn {\n  presentationId: prepData.presentationId,\n  allRequests: allRequests,\n  totalOperations: allRequests.length,\n  textOperations: allRequests.filter(req => req.replaceAllText).length,\n  imageOperations: allRequests.filter(req => req.replaceImage).length,\n  slidesProcessed: slides.length\n};"
+        "jsCode": "// 🚀 動態準備所有內容替換請求 - 支援任何欄位結構\n\nconst prepData = $('Dynamic Template Analysis').first().json;\nconst updatedPresentation = $input.first().json;\nconst slides = prepData.slidesData;\n\n// 取得動態分析的結果\nconst textPlaceholders = prepData.detectedTextPlaceholders || [];\nconst imagePlaceholders = prepData.detectedImagePlaceholders || [];\nconst apiFields = prepData.detectedApiFields || [];\n\n// 建立所有內容替換請求\nconst allRequests = [];\nconst processLog = [];\n\n// 🧠 智能欄位匹配函式\nfunction findBestMatch(placeholder, availableFields) {\n  // 1. 完全匹配\n  if (availableFields.includes(placeholder)) {\n    return placeholder;\n  }\n  \n  // 2. 忽略大小寫匹配\n  const lowerPlaceholder = placeholder.toLowerCase();\n  const exactMatch = availableFields.find(field => field.toLowerCase() === lowerPlaceholder);\n  if (exactMatch) {\n    return exactMatch;\n  }\n  \n  // 3. 部分匹配（包含關係）\n  const partialMatch = availableFields.find(field => \n    field.toLowerCase().includes(lowerPlaceholder) || \n    lowerPlaceholder.includes(field.toLowerCase())\n  );\n  if (partialMatch) {\n    return partialMatch;\n  }\n  \n  // 4. 語義匹配（常見別名）\n  const synonymMap = {\n    'title': ['main_title', 'heading', 'header', 'subject'],\n    'subtitle': ['sub_title', 'subheading', 'description'],\n    'content': ['text', 'body', 'detail'],\n    'image': ['img', 'picture', 'photo', 'image_url'],\n    'bullet1': ['point1', 'item1', 'first', 'bullet_1'],\n    'bullet2': ['point2', 'item2', 'second', 'bullet_2'],\n    'bullet3': ['point3', 'item3', 'third', 'bullet_3']\n  };\n  \n  for (const [key, synonyms] of Object.entries(synonymMap)) {\n    if (lowerPlaceholder.includes(key) || synonyms.some(syn => lowerPlaceholder.includes(syn))) {\n      const match = availableFields.find(field => {\n        const lowerField = field.toLowerCase();\n        return lowerField.includes(key) || synonyms.some(syn => lowerField.includes(syn));\n      });\n      if (match) return match;\n    }\n  }\n  \n  return null;\n}\n\n// 處理每張投影片的內容（使用實際的投影片 ID）\nslides.forEach((slideDataItem, index) => {\n  // 從更新後的簡報結構中取得實際的投影片 ID\n  const currentSlide = updatedPresentation.slides[index];\n  if (!currentSlide) return;\n  \n  const slideId = currentSlide.objectId;\n  const slideLog = { slideIndex: index, slideId, textReplacements: [], imageReplacements: [] };\n  \n  // 🔤 動態文字替換請求\n  textPlaceholders.forEach(placeholder => {\n    const matchedField = findBestMatch(placeholder, Object.keys(slideDataItem));\n    \n    if (matchedField && slideDataItem[matchedField] !== undefined) {\n      const value = slideDataItem[matchedField];\n      \n      // 只處理非空值\n      if (value !== null && value !== undefined && value.toString().trim() !== '') {\n        allRequests.push({\n          replaceAllText: {\n            containsText: {\n              text: `{{${placeholder}}}`,\n              matchCase: false\n            },\n            replaceText: value.toString().trim(),\n            pageObjectIds: [slideId]\n          }\n        });\n        \n        slideLog.textReplacements.push({\n          placeholder: `{{${placeholder}}}`,\n          matchedField: matchedField,\n          value: value.toString().trim()\n        });\n      }\n    } else {\n      // 記錄未匹配的 placeholder\n      slideLog.textReplacements.push({\n        placeholder: `{{${placeholder}}}`,\n        matchedField: null,\n        status: 'no_match'\n      });\n    }\n  });\n  \n  // 🖼️ 動態圖片替換請求\n  imagePlaceholders.forEach(placeholder => {\n    const matchedField = findBestMatch(placeholder, Object.keys(slideDataItem));\n    \n    if (matchedField && slideDataItem[matchedField]) {\n      const imageUrl = slideDataItem[matchedField];\n      \n      // 驗證是否為有效的 URL\n      if (imageUrl && imageUrl.toString().trim() !== '' && \n          (imageUrl.toString().startsWith('http://') || imageUrl.toString().startsWith('https://'))) {\n        \n        // 找出該投影片中符合此 placeholder 的圖片元素\n        const imageElements = currentSlide.pageElements.filter(element => {\n          if (!element.image) return false;\n          \n          // 檢查 description 或 title 是否包含此 placeholder\n          const description = element.description || '';\n          const title = element.title || '';\n          \n          return description.includes(`{{${placeholder}}}`) || title.includes(`{{${placeholder}}}`);\n        });\n        \n        imageElements.forEach(imageElement => {\n          allRequests.push({\n            replaceImage: {\n              imageObjectId: imageElement.objectId,\n              imageReplaceMethod: 'CENTER_CROP',\n              url: imageUrl.toString()\n            }\n          });\n          \n          slideLog.imageReplacements.push({\n            placeholder: `{{${placeholder}}}`,\n            matchedField: matchedField,\n            imageUrl: imageUrl.toString(),\n            elementId: imageElement.objectId\n          });\n        });\n      }\n    } else {\n      // 記錄未匹配的圖片 placeholder\n      slideLog.imageReplacements.push({\n        placeholder: `{{${placeholder}}}`,\n        matchedField: null,\n        status: 'no_match'\n      });\n    }\n  });\n  \n  processLog.push(slideLog);\n});\n\n// 🎯 處理完全動態的欄位（API 中有但模板中沒有 placeholder 的）\nconst unusedFields = apiFields.filter(field => \n  !textPlaceholders.some(p => findBestMatch(p, [field])) &&\n  !imagePlaceholders.some(p => findBestMatch(p, [field]))\n);\n\nreturn {\n  presentationId: prepData.presentationId,\n  allRequests: allRequests,\n  totalOperations: allRequests.length,\n  textOperations: allRequests.filter(req => req.replaceAllText).length,\n  imageOperations: allRequests.filter(req => req.replaceImage).length,\n  slidesProcessed: slides.length,\n  // 🔍 詳細的處理資訊\n  processingDetails: {\n    templateAnalysis: {\n      textPlaceholders: textPlaceholders,\n      imagePlaceholders: imagePlaceholders,\n      totalPlaceholders: textPlaceholders.length + imagePlaceholders.length\n    },\n    apiAnalysis: {\n      detectedFields: apiFields,\n      unusedFields: unusedFields\n    },\n    matchingResults: processLog,\n    summary: {\n      successfulTextMatches: processLog.reduce((sum, log) => \n        sum + log.textReplacements.filter(r => r.status !== 'no_match').length, 0),\n      successfulImageMatches: processLog.reduce((sum, log) => \n        sum + log.imageReplacements.filter(r => r.status !== 'no_match').length, 0),\n      unmatchedTextPlaceholders: processLog.reduce((sum, log) => \n        sum + log.textReplacements.filter(r => r.status === 'no_match').length, 0),\n      unmatchedImagePlaceholders: processLog.reduce((sum, log) => \n        sum + log.imageReplacements.filter(r => r.status === 'no_match').length, 0)\n    }\n  }\n};"
       },
-      "id": "82a2b895-6417-492b-bd07-2ea8d8fe7493",
-      "name": "Prepare Content Updates",
+      "id": "f9f9ace3-530b-4797-a2ea-680d45df7f18",
+      "name": "Smart Content Mapping",
       "type": "n8n-nodes-base.code",
       "position": [
-        880,
-        528
+        -144,
+        -304
       ],
       "typeVersion": 2
     },
@@ -169,12 +169,12 @@
         "jsonBody": "={\n  \"requests\": {{ JSON.stringify($json.allRequests) }}\n}",
         "options": {}
       },
-      "id": "00181f46-5e97-4c4f-9a35-0ad658167ef0",
+      "id": "8cc7db01-ce3e-4498-b9dc-73405c3bf76f",
       "name": "Execute All Updates",
       "type": "n8n-nodes-base.httpRequest",
       "position": [
-        1104,
-        528
+        80,
+        -304
       ],
       "typeVersion": 4.2,
       "credentials": {
@@ -187,17 +187,17 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={\n  \"success\": true,\n  \"message\": \"✅ 簡報生成成功\",\n  \"presentation_id\": \"{{ $('Prepare Content Updates').first().json.presentationId }}\",\n  \"presentation_url\": \"https://docs.google.com/presentation/d/{{ $('Prepare Content Updates').first().json.presentationId }}/edit\",\n  \"slide_count\": {{ $('Prepare Content Updates').first().json.slidesProcessed }},\n  \"operations_performed\": {\n    \"text_operations\": {{ $('Prepare Content Updates').first().json.textOperations }},\n    \"image_operations\": {{ $('Prepare Content Updates').first().json.imageOperations }},\n    \"total_operations\": {{ $('Prepare Content Updates').first().json.totalOperations }}\n  },\n  \"features\": {\n    \"text_replacement\": true,\n    \"image_replacement\": true,\n    \"two_stage_processing\": true\n  },\n  \"created_at\": \"{{ $now.toISO() }}\",\n  \"version\": \"v3-optimized\",\n  \"note\": \"使用兩階段處理：先複製投影片，再統一更新所有內容\"\n}",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"✅ 動態簡報生成成功\",\n  \"presentation_id\": \"{{ $('Smart Content Mapping').first().json.presentationId }}\",\n  \"presentation_url\": \"https://docs.google.com/presentation/d/{{ $('Smart Content Mapping').first().json.presentationId }}/edit\",\n  \"slide_count\": {{ $('Smart Content Mapping').first().json.slidesProcessed }},\n  \"operations_performed\": {\n    \"text_operations\": {{ $('Smart Content Mapping').first().json.textOperations }},\n    \"image_operations\": {{ $('Smart Content Mapping').first().json.imageOperations }},\n    \"total_operations\": {{ $('Smart Content Mapping').first().json.totalOperations }}\n  },\n  \"dynamic_analysis\": {\n    \"detected_placeholders\": {{ JSON.stringify($('Smart Content Mapping').first().json.processingDetails.templateAnalysis.textPlaceholders.concat($('Smart Content Mapping').first().json.processingDetails.templateAnalysis.imagePlaceholders)) }},\n    \"api_fields\": {{ JSON.stringify($('Smart Content Mapping').first().json.processingDetails.apiAnalysis.detectedFields) }},\n    \"unused_fields\": {{ JSON.stringify($('Smart Content Mapping').first().json.processingDetails.apiAnalysis.unusedFields) }},\n    \"matching_summary\": {\n      \"successful_text_matches\": {{ $('Smart Content Mapping').first().json.processingDetails.summary.successfulTextMatches }},\n      \"successful_image_matches\": {{ $('Smart Content Mapping').first().json.processingDetails.summary.successfulImageMatches }},\n      \"unmatched_placeholders\": {{ $('Smart Content Mapping').first().json.processingDetails.summary.unmatchedTextPlaceholders + $('Smart Content Mapping').first().json.processingDetails.summary.unmatchedImagePlaceholders }}\n    }\n  },\n  \"features\": {\n    \"dynamic_field_detection\": true,\n    \"smart_placeholder_matching\": true,\n    \"multi_image_support\": true,\n    \"table_text_support\": true,\n    \"synonym_matching\": true,\n    \"detailed_processing_log\": true\n  },\n  \"created_at\": \"{{ $now.toISO() }}\",\n  \"version\": \"v2-dynamic\",\n  \"note\": \"完全動態的簡報生成系統：自動分析模板結構、智能匹配 API 欄位、支援任何 placeholder 名稱\"\n}",
         "options": {
           "responseCode": 200
         }
       },
-      "id": "7592d8e7-a280-46db-9af4-b43ba3452741",
-      "name": "Success Response",
+      "id": "992b6c92-28b9-4185-9d39-0a14861d1c98",
+      "name": "Enhanced Success Response",
       "type": "n8n-nodes-base.respondToWebhook",
       "position": [
-        1328,
-        528
+        304,
+        -304
       ],
       "typeVersion": 1.1
     },
@@ -210,10 +210,10 @@
       "type": "n8n-nodes-base.googleSlides",
       "typeVersion": 2,
       "position": [
-        -240,
-        528
+        -1264,
+        -304
       ],
-      "id": "9f5d3c3e-33ea-41bb-9b4c-8f370ff6b4bf",
+      "id": "eb4aaf69-6fd7-4935-9e1c-1373053a22f4",
       "name": "Read Template Structure",
       "credentials": {
         "googleApi": {
@@ -246,7 +246,7 @@
         ]
       ]
     },
-    "Prepare Slide Duplication": {
+    "Dynamic Template Analysis": {
       "main": [
         [
           {
@@ -290,14 +290,14 @@
       "main": [
         [
           {
-            "node": "Prepare Content Updates",
+            "node": "Smart Content Mapping",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Prepare Content Updates": {
+    "Smart Content Mapping": {
       "main": [
         [
           {
@@ -312,7 +312,7 @@
       "main": [
         [
           {
-            "node": "Success Response",
+            "node": "Enhanced Success Response",
             "type": "main",
             "index": 0
           }
@@ -323,7 +323,7 @@
       "main": [
         [
           {
-            "node": "Prepare Slide Duplication",
+            "node": "Dynamic Template Analysis",
             "type": "main",
             "index": 0
           }
